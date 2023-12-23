@@ -92,10 +92,13 @@ function inactive(to, from) {
 async function send(webhook, channel, content, reactions) {
 	if (inactive(channel.id)) return;
 	if (webhook && channel.isThread()) {
-		const sent = await webhook.send({content: content, threadId: channel.id}).catch(console.error);
-	} else {
-		const sent = await (webhook || channel).send(content).catch(console.error);
+		if (typeof content === 'string') {
+			content = {content: content, threadId: channel.id};
+		} else {
+			content.threadId = channel.id;
+		}
 	}
+	const sent = await (webhook || channel).send(content).catch(console.error);
 	if (reactions.size) {
 		for (const reaction of reactions.values()) {
 			if (inactive(channel.id)) break;
@@ -126,41 +129,114 @@ function niceName(to, from, user) {
 }
 
 const systemMessages = {
-	RECIPIENT_ADD: " added someone to the group.",
-	RECIPIENT_REMOVE: " removed someone from the group.",
-	CALL: " started a call.",
-	CHANNEL_NAME_CHANGE: " changed the name of this channel.",
-	CHANNEL_ICON_CHANGE: " changed the icon of this channel.",
-	PINS_ADD: " pinned a message to this channel.",
-	GUILD_MEMBER_JOIN: " just joined."
+	[MessageType.AutoModerationAction]: "did an AutoModerationAction.",
+	[MessageType.Call]: "started a call.",
+	[MessageType.ChannelFollowAdd]: "did a ChannelFollowAdd.",
+	[MessageType.ChannelIconChange]: "changed the icon of this channel.",
+	[MessageType.ChannelNameChange]: "changed the name of this channel.",
+	[MessageType.ChannelPinnedMessage]: "pinned a message to this channel.",
+	[MessageType.ChatInputCommand]: "did a ChatInputCommand.",
+	[MessageType.ContextMenuCommand]: "did a ContextMenuCommand.",
+	[MessageType.GuildApplicationPremiumSubscription]: "did a GuildApplicationPremiumSubscription.",
+	[MessageType.GuildBoost]: "did a GuildBoost.",
+	[MessageType.GuildBoostTier1]: "did a GuildBoostTier1.",
+	[MessageType.GuildBoostTier2]: "did a GuildBoostTier2.",
+	[MessageType.GuildBoostTier3]: "did a GuildBoostTier3.",
+	[MessageType.GuildDiscoveryDisqualified]: "did a GuildDiscoveryDisqualified.",
+	[MessageType.GuildDiscoveryGracePeriodFinalWarning]: "did a GuildDiscoveryGracePeriodFinalWarning.",
+	[MessageType.GuildDiscoveryGracePeriodInitialWarning]: "did a GuildDiscoveryGracePeriodInitialWarning.",
+	[MessageType.GuildDiscoveryRequalified]: "did a GuildDiscoveryRequalified.",
+	[MessageType.GuildInviteReminder]: "did a GuildInviteReminder.",
+	[MessageType.InteractionPremiumUpsell]: "did a InteractionPremiumUpsell.",
+	[MessageType.RecipientAdd]: "added someone to the group.",
+	[MessageType.RecipientRemove]: "removed someone from the group.",
+	[MessageType.RoleSubscriptionPurchase]: "did a RoleSubscriptionPurchase.",
+	[MessageType.StageEnd]: "did a StageEnd.",
+	[MessageType.StageRaiseHand]: "did a StageRaiseHand.",
+	[MessageType.StageSpeaker]: "did a StageSpeaker.",
+	[MessageType.StageStart]: "did a StageStart.",
+	[MessageType.StageTopic]: "did a StageTopic.",
+	[MessageType.ThreadCreated]: "created a Thread.",
+	[MessageType.UserJoin]: "just joined.",
 };
+
+const normalMessages = [
+	MessageType.Default,
+	MessageType.Reply
+];
 
 async function sendMessage(message, channel, webhook, author) {
 	if (inactive(channel.id, message.channel.id)) return;
-	if (message.type !== MessageType.Default) {
-		await channel.send(`**${niceName(channel, message.channel, message.author)}${systemMessages[message.type]}**`).catch(console.error);
-	} else if (message.author.username !== author) {
+	//if (message.type === MessageType.ThreadStarterMessage) {
+	//	message = await message.channel.fetchStarterMessage();
+	//}
+	if (systemMessages[message.type] !== undefined) {
+		await channel.send(
+			`**${niceName(channel, message.channel, message.author)} ${systemMessages[message.type]}**`
+		).catch(console.error);
+		return;
+	} else if (message.type === MessageType.ThreadStarterMessage) {
+		const starterMessage = await message.channel.fetchStarterMessage();
+		config.active[starterMessage.channel.id] = true;
+		updateJson();
+		await sendMessage(starterMessage, channel, webhook, author);
+		//return;
+	} else if (normalMessages.indexOf(message.type) === -1) {
+		console.log(`Unknown message type encountered: ${message.type}`);
+		await channel.send(
+			`**${niceName(channel, message.channel, message.author)} sent an unknown type of message (${message.type})**`
+		).catch(console.error);
+		return;
+	}
+	console.log(`Sending a ${message.type} message`)
+	if (message.author.username !== author) {
+		console.log("Author is different")
 		if (webhook) {
-			await webhook.edit({name: niceName(channel, message.channel, message.author), avatar: message.author.displayAvatarURL()}).catch(console.error);
+			//await Promise.all([
+			await webhook.edit({
+				name: niceName(channel, message.channel, message.author),
+				avatar: message.author.displayAvatarURL()
+			}).catch(console.error);//,
+				//new Promise(resolve => setTimeout(resolve, 10000))
+			//]);
 		} else {
 			await channel.send(`**${niceName(channel, message.channel, message.author)}**`).catch(console.error);
 		}
 	}
+	const out = {};
+	const bigFiles = [];
 	if (message.content) {
-		await send(webhook, channel, message.content, message.reactions);
+		out.content = message.content
 	}
 	if (message.attachments.size) {
+		out.files = [];
 		for (const attachment of message.attachments.values()) {
-			await send(webhook, channel, attachment.filesize > 8000000 ? attachment.url : { files: [attachment.url] }, message.reactions);
+			if (attachment.filesize > 8000000) {
+				bigFiles.push(attachment.url);
+			} else {
+				out.files.push(attachment.url);
+			}
+			//await send(webhook, channel, attachment.filesize > 8000000 ? attachment.url : { files: [attachment.url] }, message.reactions);
 		}
 	}
 	if (message.embeds.length) {
+		out.embeds = message.embeds;
+		/*[];
 		for (let i = 0; i < message.embeds.length; i++) {
 			const embed = message.embeds[i];
 			if (embed.type === "rich") {
+				out.embeds.push(embed);
 				await send(webhook, channel, embed, channel, message.reactions);
 			}
-		}
+		}*/
+	}
+	if (Object.keys(out).length) {
+		await send(webhook, channel, out, message.reactions);
+	} else {
+		console.log(`Empty message ${message.id}`);
+	}
+	for (let i = 0; i < bigFiles.length; i++) {
+		await send(webhook, channel, bigFiles[i], message.reactions);
 	}
 }
 
@@ -179,6 +255,10 @@ async function sendMessages(messages, channel, webhook, author) {
 
 async function fetchMessages(from, to, webhook) {
 	let messages = new Collection();
+	/*if (from.isThread()) {
+		let starterMessage = await from.fetchStarterMessage();
+		messages.set(starterMessage.id, starterMessage);
+	}*/
 	let messageBatch = await from.messages.fetch({limit: 100}).catch(async function() {
 		await to.send("**Couldn't fetch messages!**").catch(console.error);
 	});
