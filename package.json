@@ -1,15 +1,15 @@
 {
-  "name": "Discord-Reposter",
+  "name": "Kenku",
   "version": "1.0.0",
   "description": "Bot for reposting Discord messages.",
-  "main": "reposter.js",
+  "main": "kenku.js",
   "engines": {
     "node": "12.x",
     "npm": "*"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node reposter.js"
+    "start": "node kenku.js"
   },
   "keywords": [
     "discord",
@@ -31,10 +31,11 @@
     "reposter",
     "reposts"
   ],
-  "author": "MysteryPancake",
+  "author": "Lathaon",
   "license": "MIT",
   "dependencies": {
-    "discord.js": "^12.4.1",
-    "@discordjs/opus": "^0.3.3"
+    "@discordjs/opus": "^0.9.0",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1"
   }
 }
