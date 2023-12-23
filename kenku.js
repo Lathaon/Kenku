@@ -188,9 +188,7 @@ async function sendMessage(message, channel, webhook, author) {
 		).catch(console.error);
 		return;
 	}
-	console.log(`Sending a ${message.type} message`)
 	if (message.author.username !== author) {
-		console.log("Author is different")
 		if (webhook) {
 			//await Promise.all([
 			await webhook.edit({
@@ -216,7 +214,6 @@ async function sendMessage(message, channel, webhook, author) {
 			} else {
 				out.files.push(attachment.url);
 			}
-			//await send(webhook, channel, attachment.filesize > 8000000 ? attachment.url : { files: [attachment.url] }, message.reactions);
 		}
 	}
 	if (message.embeds.length) {
@@ -232,8 +229,6 @@ async function sendMessage(message, channel, webhook, author) {
 	}
 	if (Object.keys(out).length) {
 		await send(webhook, channel, out, message.reactions);
-	} else {
-		console.log(`Empty message ${message.id}`);
 	}
 	for (let i = 0; i < bigFiles.length; i++) {
 		await send(webhook, channel, bigFiles[i], message.reactions);
