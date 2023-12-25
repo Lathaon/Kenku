@@ -57,15 +57,23 @@ async function registerSlashCommands() {
 					)).toJSON(),
 		new SlashCommandBuilder()
 			.setName("stop")
-			.setDescription("Stops copying messages.").toJSON()
+			.setDescription("Stops copying messages.")
+			.addChannelOption(option =>
+				option.setName("channel")
+					.setDescription("The channel to stop pasting messages into.")
+					.addChannelTypes(
+						ChannelType.GuildText,
+						ChannelType.PublicThread,
+						ChannelType.PrivateThread
+					)).toJSON()
 	];
 	await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {body: commands});
 }
 
 
-client.on("ready", function() {
-	// registerSlashCommands();
+client.on("ready", async function() {
 	client.user.setActivity({name: "D&D with Avrae", type: ActivityType.Playing});
+	// await registerSlashCommands(); // Uncomment if anything changes.
 	console.log("READY FOR ACTION!");
 });
 
@@ -132,30 +140,45 @@ const normalMessages = [
 	MessageType.ChatInputCommand
 ];
 
-async function sendMessage(message, channel, webhook, author) {
+async function updateWebhook(webhook, message) {
+	if (!webhook) return false;
+	try {
+		await webhook.edit({
+			name: message.author.username,
+			avatar: message.author.displayAvatarURL()
+		});
+	} catch (err) {
+		console.error(err);
+		return false;
+	}
+	return true;
+}
+
+async function sendMessage(message, from, to, webhook, lastAuthor) {
+	// Let's check our copying hasn't been /stop.
+	if (activeChannels[to.id] !== from.id) return false;
+
 	if (systemMessages[message.type] !== undefined) {
-		await channel.send(
+		await to.send(
 			`**${message.author.username} ${systemMessages[message.type]}**`
 		).catch(console.error);
-		return;
+		return true;
 	} else if (message.type === MessageType.ThreadStarterMessage) {
 		const starterMessage = await message.channel.fetchStarterMessage();
-		await sendMessage(starterMessage, channel, webhook, author);
+		await sendMessage(starterMessage, from, to, webhook, lastAuthor);
 	} else if (normalMessages.indexOf(message.type) === -1) {
 		console.log(`Unknown message type encountered: ${message.type}`);
-		await channel.send(
+		await to.send(
 			`**${message.author.username} sent an unknown type of message (${message.type})**`
 		).catch(console.error);
-		return;
+		return true;
 	}
-	if (message.author.username !== author) {
-		if (webhook) {
-			await webhook.edit({
-				name: message.author.username,
-				avatar: message.author.displayAvatarURL()
-			}).catch(console.error);
-		} else {
-			await channel.send(`**${message.author.username}**`).catch(console.error);
+	if (message.author.username !== lastAuthor) {
+		let webhookUpdated = await updateWebhook(webhook, message);
+		// Webhook edits can take ages so let's double check our copying hasn't been /stop.
+		if (activeChannels[to.id] !== from.id) return false;
+		if (!webhookUpdated) {
+			await to.send(`**${message.author.username}**`).catch(console.error);
 		}
 	}
 	const out = {};
@@ -189,21 +212,10 @@ async function sendMessage(message, channel, webhook, author) {
 		}
 	}
 	if (notEmpty) {
-		await send(webhook, channel, out, message.reactions);
+		await send(webhook, to, out, message.reactions);
 	}
 	for (const bigFile of bigFiles) {
-		await send(webhook, channel, bigFile, message.reactions);
-	}
-}
-
-async function sendMessages(messages, from, to, webhook, author) {
-	let last;
-	if (messages && messages.size) {
-		for (const message of [...messages.values()].reverse()) {
-			if (activeChannels[to.id] !== from.id) return false;
-			await sendMessage(message, to, webhook, last ? last.author.username : author);
-			last = message;
-		}
+		await send(webhook, to, bigFile, message.reactions);
 	}
 	return true;
 }
@@ -224,7 +236,14 @@ async function fetchMessages(from, to, webhook, interaction) {
 			await reply(interaction, "Failed to fetch messages!");
 		});
 	}
-	return await sendMessages(messages, from, to, webhook, null);
+	let lastAuthor = null;
+	if (messages && messages.size) {
+		for (const message of [...messages.values()].reverse()) {
+			if (!await sendMessage(message, from, to, webhook, lastAuthor)) return false;
+			lastAuthor = message.author.username;
+		}
+	}
+	return true;
 }
 
 async function fetchWebhook(channel, interaction) {
@@ -297,8 +316,9 @@ client.on(Events.InteractionCreate, async interaction => {
 			}
 			break;
 		case "stop":
-			delete activeChannels[interaction.channel.id];
-			await reply(interaction, "Okay, I'll stop copying!");
+			let channel = interaction.options.getChannel("channel") || interaction.channel;
+			delete activeChannels[channel.id];
+			await reply(interaction, `Okay, I'll stop pasting into <#${channel.id}>!`);
 			break;
 		default:
 			console.error(`No command matching ${interaction.commandName} was found.`);
