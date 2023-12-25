@@ -1,78 +1,32 @@
-<img src="repost.png?raw=true" width="75" align="left">
+# Kenku
+A Discord bot for copying all messages from one channel to another, using webhooks to imitate different users.
 
-# Discord Reposter
-A simple bot I made because I wanted my friends to stop deleting their messages.
-
-It reposts all the messages from one channel to another, which can even be in another server!
-
-However, the bot needs to be in both servers for this to work.
+The original code included some other functionality (that I didn't care to maintain), but didn't support threads or slash commands.
 
 ## Commands
-### Repost To
-*Reposts to a channel.*
+### Help
+*At some point this will show some useful help, but for now it's just a placeholder.*
 
-`/repost <CHANNEL>` or `/repost to <CHANNEL>`
+`/help`
 
-### Repost From
-*Reposts from a channel.*
+### Copy
+*Copies messages from one channel and pastes them in another. Defaults to the channel you enter the command in.*
 
-`/repost from <CHANNEL>`
+`/copy from:<CHANNEL> to:<CHANNEL2>`
 
-### Repost Webhook
-*Reposts through a webhook.*
+### Stop
+*Stops pasting messages in a channel. Defaults to the channel you enter the command in.*
 
-`/reposthook` or `/repostwebhook` instead of `/repost`
-
-### Repost Live
-*Reposts messages as they come.*
-
-`/repostlive` or `/repostlivehook` instead of `/repost`
-
-### Repost Stop
-*Stops reposting.*
-
-`/repost stop` or `/repost halt` or `/repost cease` or `/repost terminate` or `/repost suspend` or `/repost cancel` or `/repost die` or `/repost end`
-
-### Repost Commands
-*Posts the command list.*
-
-`/repost help` or `/repost commands`
-
-### Repost Replace
-*Replaces text when reposting.*
-
-`/repost replace <FIND> <REPLACE>`
-
-### Repost Replacements
-*Posts the replacement list.*
-
-`/repost replacements`
-
-### Repost Prefix
-*Changes the bot prefix.*
-
-`/repost prefix <PREFIX>`
-
-### Repost Tags
-*Toggles user tags when reposting.*
-
-`/repost tags` or `/repost tags <STATE>`
-
-### Repost Nicknames
-*Toggles nicknames when reposting.*
-
-`/repost nicknames` or `/repost nicknames <STATE>`
-
-### Repost Pins
-*Toggles pins when reposting.*
-
-`/repost pins` or `/repost pins <STATE>`
+`/stop channel:<CHANNEL>`
 
 ## Setup
 1. [Create your app with a Bot](https://discordapp.com/developers/applications/me).
-2. Copy your bot's secret token and [paste it on this line](reposter.js#L9). Please don't leak your secret token on GitHub. If you're using Heroku, try to replace it with `process.env.SECRET_BOT_TOKEN` and setup the environment variable in Heroku.
-3. Go to `https://discordapp.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot`, with `<CLIENT_ID>` as your app's client ID.
+2. Create a `kenku.env` file like this, filling in with your bot's details (don't share the token on GitHub!): ```
+DISCORD_TOKEN=
+CLIENT_ID=
+```
+3. Invite your bot using `https://discordapp.com/oauth2/authorize?client_id=<CLIENT_ID>&scope=bot`, with `<CLIENT_ID>` as your app's client ID.
 4. [Install Node.js](https://nodejs.org/en/download): `brew install node`
 5. [Install the dependencies](package.json#L36-L38): `npm install`
-6. [Run the bot](reposter.js): `npm start`
+6. [Run the bot](kenku.js): `npm start`
 7. Hope it works!
