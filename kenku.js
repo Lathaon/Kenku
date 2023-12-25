@@ -10,7 +10,6 @@ const {
 	GatewayIntentBits,
 	MessageType,
 	ChannelType,
-	EmbedBuilder,
 	Collection,
 	ActivityType,
 	SlashCommandBuilder,
@@ -103,7 +102,6 @@ const systemMessages = {
 	[MessageType.ChannelIconChange]: "changed the icon of this channel.",
 	[MessageType.ChannelNameChange]: "changed the name of this channel.",
 	[MessageType.ChannelPinnedMessage]: "pinned a message to this channel.",
-	[MessageType.ChatInputCommand]: "did a ChatInputCommand.",
 	[MessageType.ContextMenuCommand]: "did a ContextMenuCommand.",
 	[MessageType.GuildApplicationPremiumSubscription]: "did a GuildApplicationPremiumSubscription.",
 	[MessageType.GuildBoost]: "did a GuildBoost.",
@@ -130,7 +128,8 @@ const systemMessages = {
 
 const normalMessages = [
 	MessageType.Default,
-	MessageType.Reply
+	MessageType.Reply,
+	MessageType.ChatInputCommand
 ];
 
 async function sendMessage(message, channel, webhook, author) {
@@ -212,7 +211,7 @@ async function sendMessages(messages, from, to, webhook, author) {
 async function fetchMessages(from, to, webhook, interaction) {
 	let messages = new Collection();
 	let messageBatch = await from.messages.fetch({limit: 100}).catch(async function() {
-		await interaction.reply({content: "Failed to fetch messages!", ephemeral: true});
+		await reply(interaction, "Failed to fetch messages!");
 	});
 	while (messageBatch && messageBatch.size > 0) {
 		if (activeChannels[to.id] !== from.id) return false;
@@ -222,7 +221,7 @@ async function fetchMessages(from, to, webhook, interaction) {
 			limit: 100,
 			before: messageBatch.last().id,
 		}).catch(async function() {
-			await interaction.reply({content: "Failed to fetch messages!", ephemeral: true});
+			await reply(interaction, "Failed to fetch messages!");
 		});
 	}
 	return await sendMessages(messages, from, to, webhook, null);
@@ -231,7 +230,7 @@ async function fetchMessages(from, to, webhook, interaction) {
 async function fetchWebhook(channel, interaction) {
 	const webhookChannel = channel.isThread() ? channel.parent : channel
 	const webhooks = await webhookChannel.fetchWebhooks().catch(async function() {
-		await interaction.reply({content: "Failed to read webhooks!", ephemeral: true});
+		await reply(interaction, "Failed to read webhooks!");
 	});
 	if (webhooks) {
 		for (const webhook of webhooks.values()) {
@@ -253,28 +252,16 @@ const validChannelTypes = [
 	ChannelType.PrivateThread
 ];
 
-async function repost(from, to, interaction) {
-	if (from.id === to.id) {
-		await interaction.reply({content: "I can't paste in the same channel I'm copying from!", ephemeral: true});
-	} else if (validChannelTypes.indexOf(to.type) === -1) {
-		await interaction.reply({content: "I can only copy from text-based server channels!", ephemeral: true});
-	} else if (validChannelTypes.indexOf(to.type) === -1) {
-		await interaction.reply({content: "I can only paste in text-based server channels!", ephemeral: true});
-	} else if (!to.permissionsFor(client.user).has(PermissionsBitField.Flags.SendMessages)) {
-		await interaction.reply({content: `I haven't got permission to post in <#${to.id}>!`, ephemeral: true});
-	} else if (activeChannels[to.id] !== undefined) {
-		await interaction.reply({content: `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`, ephemeral: true});
-	} else {
-		await interaction.reply({content: `Okay, I'll copy messages from <#${from.id}> to <#${to.id}>...`, ephemeral: true});
-		activeChannels[to.id] = from.id;
-		const hook = await fetchWebhook(to, interaction);
-		if (await fetchMessages(from, to, hook, interaction)) {
-			await interaction.followUp({content: "I've finished copying!", ephemeral: true});
-		} else {
-			await interaction.followUp({content: "I've aborted copying!", ephemeral: true});
-		}
-		delete activeChannels[to.id];
-	}
+async function reply(interaction, content) {
+	return await interaction.reply({content: content, ephemeral: true}).catch(async function() {
+		await interaction.channel.send(content).catch(console.error);
+	});
+}
+
+async function followUp(interaction, content) {
+	return await interaction.followUp({content: content, ephemeral: true}).catch(async function() {
+		await interaction.channel.send(content).catch(console.error);
+	});
 }
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -282,16 +269,36 @@ client.on(Events.InteractionCreate, async interaction => {
 
 	switch (interaction.commandName) {
 		case "help":
-			await interaction.reply({content: "I can help you!", ephemeral: true});
+			await reply(interaction, "I can help you!");
 			break;
 		case "copy":
 			let from = interaction.options.getChannel("from") || interaction.channel;
 			let to = interaction.options.getChannel("to") || interaction.channel;
-			await repost(from, to, interaction);
+			if (from.id === to.id) {
+				await reply(interaction, "I can't paste in the same channel I'm copying from!");
+			} else if (validChannelTypes.indexOf(to.type) === -1) {
+				await reply(interaction, "I can only copy from text-based server channels!");
+			} else if (validChannelTypes.indexOf(to.type) === -1) {
+				await reply(interaction, "I can only paste in text-based server channels!");
+			} else if (!to.permissionsFor(client.user).has(to.isThread() ? PermissionsBitField.Flags.SendMessagesInThreads : PermissionsBitField.Flags.SendMessages)) {
+				await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
+			} else if (activeChannels[to.id] !== undefined) {
+				await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
+			} else {
+				await reply(interaction, `Okay, I'll copy messages from <#${from.id}> to <#${to.id}>...`);
+				activeChannels[to.id] = from.id;
+				const hook = await fetchWebhook(to, interaction).catch(console.error);
+				if (await fetchMessages(from, to, hook, interaction)) {
+					await followUp(interaction, "I've finished copying!");
+				} else {
+					await followUp(interaction, "I've aborted copying!");
+				}
+				delete activeChannels[to.id];
+			}
 			break;
 		case "stop":
 			delete activeChannels[interaction.channel.id];
-			await interaction.reply({content: "Okay, I'll stop copying!", ephemeral: true});
+			await reply(interaction, "Okay, I'll stop copying!");
 			break;
 		default:
 			console.error(`No command matching ${interaction.commandName} was found.`);
