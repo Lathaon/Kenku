@@ -21,7 +21,8 @@ The original code included some other functionality (that I didn't care to maint
 
 ## Setup
 1. [Create your app with a Bot](https://discordapp.com/developers/applications/me).
-2. Create a `kenku.env` file like this, filling in with your bot's details (don't share the token on GitHub!): ```
+2. Create a `kenku.env` file like this, filling in with your bot's details (don't share the token on GitHub!):
+```
 DISCORD_TOKEN=
 CLIENT_ID=
 ```
