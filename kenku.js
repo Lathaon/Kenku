@@ -39,22 +39,43 @@ async function registerSlashCommands() {
 		new SlashCommandBuilder()
 			.setName("copy")
 			.setDescription("Copies all messages from another channel.")
-			.addChannelOption(option =>
-				option.setName("from")
-					.setDescription("The channel to copy messages from.")
-					.addChannelTypes(
-						ChannelType.GuildText,
-						ChannelType.PublicThread,
-						ChannelType.PrivateThread
-					))
-			.addChannelOption(option =>
-				option.setName("to")
-					.setDescription("The channel to paste messages to.")
-					.addChannelTypes(
-						ChannelType.GuildText,
-						ChannelType.PublicThread,
-						ChannelType.PrivateThread
-					)).toJSON(),
+			.addSubcommand(subcommand =>
+				subcommand
+					.setName('channel')
+					.setDescription('Copies all messages from one channel to another.')
+					.addChannelOption(option =>
+						option.setName("from")
+							.setDescription("The channel to copy messages from.")
+							.addChannelTypes(
+								ChannelType.GuildText,
+								ChannelType.PublicThread,
+								ChannelType.PrivateThread
+							))
+					.addChannelOption(option =>
+						option.setName("to")
+							.setDescription("The channel to paste messages to.")
+							.addChannelTypes(
+								ChannelType.GuildText,
+								ChannelType.PublicThread,
+								ChannelType.PrivateThread
+							))
+			).addSubcommand(subcommand =>
+				subcommand
+					.setName('message')
+					.setDescription('Copies a single message.')
+					.addStringOption(option =>
+						option.setName("link")
+							.setDescription("The URL of the message to copy.")
+							.setRequired(true))
+					.addChannelOption(option =>
+						option.setName("to")
+							.setDescription("The channel to paste the message in.")
+							.addChannelTypes(
+								ChannelType.GuildText,
+								ChannelType.PublicThread,
+								ChannelType.PrivateThread
+							))
+			).toJSON(),
 		new SlashCommandBuilder()
 			.setName("stop")
 			.setDescription("Stops copying messages.")
@@ -291,28 +312,65 @@ client.on(Events.InteractionCreate, async interaction => {
 			await reply(interaction, "I can help you!");
 			break;
 		case "copy":
-			let from = interaction.options.getChannel("from") || interaction.channel;
 			let to = interaction.options.getChannel("to") || interaction.channel;
-			if (from.id === to.id) {
-				await reply(interaction, "I can't paste in the same channel I'm copying from!");
-			} else if (validChannelTypes.indexOf(to.type) === -1) {
-				await reply(interaction, "I can only copy from text-based server channels!");
-			} else if (validChannelTypes.indexOf(to.type) === -1) {
-				await reply(interaction, "I can only paste in text-based server channels!");
-			} else if (!to.permissionsFor(client.user).has(to.isThread() ? PermissionsBitField.Flags.SendMessagesInThreads : PermissionsBitField.Flags.SendMessages)) {
-				await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
-			} else if (activeChannels[to.id] !== undefined) {
-				await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
-			} else {
-				await reply(interaction, `Okay, I'll copy messages from <#${from.id}> to <#${to.id}>...`);
-				activeChannels[to.id] = from.id;
-				const hook = await fetchWebhook(to, interaction).catch(console.error);
-				if (await fetchMessages(from, to, hook, interaction)) {
-					await followUp(interaction, "I've finished copying!");
-				} else {
-					await followUp(interaction, "I've aborted copying!");
-				}
-				delete activeChannels[to.id];
+			let from;
+			switch (interaction.options.getSubcommand()) {
+				case "channel":
+					from = interaction.options.getChannel("from") || interaction.channel;
+					if (from.id === to.id) {
+						await reply(interaction, "I can't paste in the same channel I'm copying from!");
+					} else if (validChannelTypes.indexOf(from.type) === -1) {
+						await reply(interaction, "I can only copy from text-based server channels!");
+					} else if (validChannelTypes.indexOf(to.type) === -1) {
+						await reply(interaction, "I can only paste in text-based server channels!");
+					} else if (!to.permissionsFor(client.user).has(to.isThread() ? PermissionsBitField.Flags.SendMessagesInThreads : PermissionsBitField.Flags.SendMessages)) {
+						await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
+					} else if (activeChannels[to.id] !== undefined) {
+						await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
+					} else {
+						await reply(interaction, `Okay, I'll copy messages from <#${from.id}> to <#${to.id}>...`);
+						activeChannels[to.id] = from.id;
+						const hook = await fetchWebhook(to, interaction).catch(console.error);
+						if (await fetchMessages(from, to, hook, interaction)) {
+							followUp(interaction, "I've finished copying!");
+						} else {
+							followUp(interaction, "I've aborted copying!");
+						}
+						delete activeChannels[to.id];
+					}
+					break;
+				case "message":
+					if (validChannelTypes.indexOf(to.type) === -1) {
+						await reply(interaction, "I can only paste in text-based server channels!");
+					} else if (!to.permissionsFor(client.user).has(to.isThread() ? PermissionsBitField.Flags.SendMessagesInThreads : PermissionsBitField.Flags.SendMessages)) {
+						await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
+					} else if (activeChannels[to.id] !== undefined) {
+						await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
+					} else {
+						let message_url = interaction.options.getString("link");
+						let regex = /https?:\/\/(?:www\.)?discord\.com\/channels\/(?:[0-9]+)\/([0-9]+)\/([0-9]+)/gi;
+						let matches = [...message_url.matchAll(regex)];
+						if (matches.length !== 1 && matches[0].length !== 3) {
+							await reply(interaction, `${message_url} is not a valid message link.`);
+						} else {
+							await reply(interaction, "Okay, I'll copy that message!")
+							let channel_id = matches[0][1];
+							let message_id = matches[0][2];
+							try {
+								from = await client.channels.fetch(channel_id);
+								let message = await from.messages.fetch(message_id);
+								const hook = await fetchWebhook(to, interaction);
+								activeChannels[to.id] = from.id;
+								await sendMessage(message, from, to, hook, null);
+								followUp(interaction, "I've finished copying that message!");
+							} catch (err) {
+								console.error(err);
+								followUp(interaction, "I've failed to copy that message...");
+							}
+							delete activeChannels[to.id];
+						}
+					}
+					break;
 			}
 			break;
 		case "stop":
