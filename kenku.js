@@ -35,7 +35,8 @@ async function registerSlashCommands() {
 	const commands = [
 		new SlashCommandBuilder()
 			.setName("help")
-			.setDescription("Shows help for using this bot.").toJSON(),
+			.setDescription("Shows help for using this bot.")
+			.setDMPermission(false).toJSON(),
 		new SlashCommandBuilder()
 			.setName("copy")
 			.setDescription("Copies all messages from another channel.")
@@ -74,8 +75,11 @@ async function registerSlashCommands() {
 								ChannelType.GuildText,
 								ChannelType.PublicThread,
 								ChannelType.PrivateThread
-							))
-			).toJSON(),
+							)))
+			.setDefaultMemberPermissions(
+				PermissionsBitField.Flags.ManageGuild
+			)
+			.setDMPermission(false).toJSON(),
 		new SlashCommandBuilder()
 			.setName("stop")
 			.setDescription("Stops copying messages.")
@@ -86,7 +90,11 @@ async function registerSlashCommands() {
 						ChannelType.GuildText,
 						ChannelType.PublicThread,
 						ChannelType.PrivateThread
-					)).toJSON()
+					))
+			.setDefaultMemberPermissions(
+				PermissionsBitField.Flags.ManageGuild
+			)
+			.setDMPermission(false).toJSON()
 	];
 	await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {body: commands});
 }
@@ -94,7 +102,7 @@ async function registerSlashCommands() {
 
 client.on("ready", async function() {
 	client.user.setActivity({name: "D&D with Avrae", type: ActivityType.Playing});
-	// await registerSlashCommands(); // Uncomment if anything changes.
+	// await registerSlashCommands(); // Uncomment whenever anything changes.
 	console.log("READY FOR ACTION!");
 });
 
@@ -278,12 +286,14 @@ async function fetchWebhook(channel, interaction) {
 				return webhook;
 			}
 		}
+		return webhookChannel.createWebhook({
+			name: "Kenku Beak",
+			avatar: client.user.displayAvatarURL(),
+			reason: "Reposting"
+		}).catch(async function() {
+			await reply(interaction, "Failed to create webhook!");
+		});
 	}
-	return webhookChannel.createWebhook({
-		name: "Kenku Beak",
-		avatar: client.user.displayAvatarURL(),
-		reason: "Reposting"
-	}).catch(console.error);
 }
 
 const validChannelTypes = [
@@ -306,7 +316,6 @@ async function followUp(interaction, content) {
 
 client.on(Events.InteractionCreate, async interaction => {
 	if (!interaction.isChatInputCommand()) return;
-
 	switch (interaction.commandName) {
 		case "help":
 			await reply(interaction, "I can help you!");
