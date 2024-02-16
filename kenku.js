@@ -108,10 +108,6 @@ client.on("ready", async function() {
 
 const activeChannels = {};
 
-function capitalizeFirst(str) {
-	return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
 async function send(webhook, channel, content, reactions) {
 	if (webhook && channel.isThread()) {
 		if (typeof content === 'string') {
@@ -169,23 +165,11 @@ const normalMessages = [
 	MessageType.ChatInputCommand
 ];
 
-async function updateWebhook(webhook, message) {
-	if (!webhook) return false;
-	try {
-		await webhook.edit({
-			name: message.author.username,
-			avatar: message.author.displayAvatarURL()
-		});
-	} catch (err) {
-		console.error(err);
-		return false;
-	}
-	return true;
-}
-
-async function sendMessage(message, from, to, webhook, lastAuthor) {
+async function copyMessage(message, from, to, webhooks) {
 	// Let's check our copying hasn't been /stop.
 	if (activeChannels[to.id] !== from.id) return false;
+
+	to.sendTyping();
 
 	if (systemMessages[message.type] !== undefined) {
 		await to.send(
@@ -194,7 +178,7 @@ async function sendMessage(message, from, to, webhook, lastAuthor) {
 		return true;
 	} else if (message.type === MessageType.ThreadStarterMessage) {
 		const starterMessage = await message.channel.fetchStarterMessage();
-		await sendMessage(starterMessage, from, to, webhook, lastAuthor);
+		await copyMessage(starterMessage, from, to, webhook, lastAuthor);
 	} else if (normalMessages.indexOf(message.type) === -1) {
 		console.log(`Unknown message type encountered: ${message.type}`);
 		await to.send(
@@ -202,13 +186,11 @@ async function sendMessage(message, from, to, webhook, lastAuthor) {
 		).catch(console.error);
 		return true;
 	}
-	if (message.author.username !== lastAuthor) {
-		let webhookUpdated = await updateWebhook(webhook, message);
-		// Webhook edits can take ages so let's double check our copying hasn't been /stop.
-		if (activeChannels[to.id] !== from.id) return false;
-		if (!webhookUpdated) {
-			await to.send(`**${message.author.username}**`).catch(console.error);
-		}
+	const hook = await getWebhook(webhooks, message, to);
+	// Webhook edits can take ages so let's double check our copying hasn't been /stop.
+	if (activeChannels[to.id] !== from.id) return false;
+	if (!hook) {
+		await to.send(`**${message.author.username}**`).catch(console.error);
 	}
 	const out = {};
 	const bigFiles = [];
@@ -241,15 +223,15 @@ async function sendMessage(message, from, to, webhook, lastAuthor) {
 		}
 	}
 	if (notEmpty) {
-		await send(webhook, to, out, message.reactions);
+		await send(hook, to, out, message.reactions);
 	}
 	for (const bigFile of bigFiles) {
-		await send(webhook, to, bigFile, message.reactions);
+		await send(hook, to, bigFile, message.reactions);
 	}
 	return true;
 }
 
-async function fetchMessages(from, to, webhook, interaction) {
+async function copyMessages(from, to, webhooks, interaction) {
 	let messages = new Collection();
 	let messageBatch = await from.messages.fetch({limit: 100}).catch(async function() {
 		await reply(interaction, "Failed to fetch messages!");
@@ -268,31 +250,92 @@ async function fetchMessages(from, to, webhook, interaction) {
 	let lastAuthor = null;
 	if (messages && messages.size) {
 		for (const message of [...messages.values()].reverse()) {
-			if (!await sendMessage(message, from, to, webhook, lastAuthor)) return false;
-			lastAuthor = message.author.username;
+			if (!await copyMessage(message, from, to, webhooks)) return false;
 		}
 	}
 	return true;
 }
 
-async function fetchWebhook(channel, interaction) {
+async function fetchWebhooks(channel, interaction) {
 	const webhookChannel = channel.isThread() ? channel.parent : channel
 	const webhooks = await webhookChannel.fetchWebhooks().catch(async function() {
 		await reply(interaction, "Failed to read webhooks!");
 	});
 	if (webhooks) {
+		const webhooksOut = [];
 		for (const webhook of webhooks.values()) {
 			if (webhook.owner.id === client.user.id) {
-				return webhook;
+				webhooksOut.push(webhook);
 			}
 		}
-		return webhookChannel.createWebhook({
-			name: "Kenku Beak",
-			avatar: client.user.displayAvatarURL(),
+		if (!webhooksOut.length) {
+			let newHook = await webhookChannel.createWebhook({
+				name: "Kenku Beak",
+				avatar: client.user.displayAvatarURL(),
+				reason: "Reposting"
+			}).catch(console.log);
+			if (newHook) {
+				webhooksOut.push(newHook);
+			}
+		}
+		if (webhooksOut.length) {
+			return {active: [], spare: webhooksOut, knownAvatars: {}};
+		} else {
+			await reply(interaction, "Failed to create or retrieve webhook!");
+		}
+	}
+}
+
+async function createWebhook(channel, name, url) {
+	return await channel.createWebhook({
+		name: message ? message.author.username : "Kenku Beak",
+		avatar: (message ? message.author : client.user).displayAvatarURL(),
+		reason: "Reposting"
+	}).catch(console.log);
+}
+
+async function getWebhook(webhooks, message, channel) {
+	if (!webhooks) return false;
+	for (let i = 0; i < webhooks.active.length; i++) {
+		let hook = webhooks.active[i];
+		if (hook.name === message.author.username && hook.avatar === webhooks.knownAvatars[message.author.avatar]) {
+			webhooks.active.splice(i, 1);
+			webhooks.active.push(hook)
+			return hook;
+		}
+	}
+	let hook;
+	if (!webhooks.spare.length) {
+		hook = await (channel.isThread() ? channel.parent : channel).createWebhook({
+			name: message.author.username,
+			avatar: message.author.displayAvatarURL(),
 			reason: "Reposting"
-		}).catch(async function() {
-			await reply(interaction, "Failed to create webhook!");
-		});
+		}).catch(console.log);
+	}
+	if (!hook) {
+		hook = (webhooks.spare.length ? webhooks.spare : webhooks.active).shift();
+		try {
+			await hook.edit({
+				name: message.author.username,
+				avatar: message.author.displayAvatarURL()
+			});
+		} catch (err) {
+			console.error(err);
+			return false;
+		}
+	}
+	webhooks.active.push(hook);
+	webhooks.knownAvatars[message.author.avatar] = hook.avatar;
+	return hook;
+}
+
+async function deleteWebhooks(webhooks) {
+	if (!webhooks) return false;
+	for (const hook of webhooks.active) {
+		await hook.delete("Finished copying").catch(console.log);
+	}
+	for (const hook of webhooks.spare) {
+		await hook.delete("Finished copying").catch(console.log);
 	}
 }
 
@@ -339,13 +382,11 @@ client.on(Events.InteractionCreate, async interaction => {
 					} else {
 						await reply(interaction, `Okay, I'll copy messages from <#${from.id}> to <#${to.id}>...`);
 						activeChannels[to.id] = from.id;
-						const hook = await fetchWebhook(to, interaction).catch(console.error);
-						if (await fetchMessages(from, to, hook, interaction)) {
-							followUp(interaction, "I've finished copying!");
-						} else {
-							followUp(interaction, "I've aborted copying!");
-						}
+						const hooks = await fetchWebhooks(to, interaction, 10).catch(console.error);
+						const result = await copyMessages(from, to, hooks, interaction);
+						await deleteWebhooks(hooks);
 						delete activeChannels[to.id];
+						followUp(interaction, result ? "I've finished copying!" : "I've aborted copying!");
 					}
 					break;
 				case "message":
@@ -368,15 +409,18 @@ client.on(Events.InteractionCreate, async interaction => {
 							try {
 								from = await client.channels.fetch(channel_id);
 								let message = await from.messages.fetch(message_id);
-								const hook = await fetchWebhook(to, interaction);
+								const hooks = await fetchWebhooks(to, interaction, 1);
 								activeChannels[to.id] = from.id;
-								await sendMessage(message, from, to, hook, null);
+								await copyMessage(message, from, to, hooks);
+								await deleteWebhooks(hooks);
+								delete activeChannels[to.id];
 								followUp(interaction, "I've finished copying that message!");
 							} catch (err) {
 								console.error(err);
+								await deleteWebhooks(hooks);
+								delete activeChannels[to.id];
 								followUp(interaction, "I've failed to copy that message...");
 							}
-							delete activeChannels[to.id];
 						}
 					}
 					break;
