@@ -107,6 +107,7 @@ client.on("ready", async function() {
 });
 
 const activeChannels = {};
+const activeParentChannels = {};
 
 async function send(webhook, channel, content, reactions) {
 	if (webhook && channel.isThread()) {
@@ -379,13 +380,17 @@ client.on(Events.InteractionCreate, async interaction => {
 						await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
 					} else if (activeChannels[to.id] !== undefined) {
 						await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
+					} else if (to.isThread() && activeParentChannels[to.parent.id] !== undefined) {
+						await reply(interaction, `I'm already pasting into <#${activeParentChannels[to.parent.id]}> from <#${activeChannels[activeParentChannels[to.parent.id]]}>!`);
 					} else {
 						await reply(interaction, `Okay, I'll copy messages from <#${from.id}> to <#${to.id}>...`);
 						activeChannels[to.id] = from.id;
+						if (to.isThread()) activeParentChannels[to.parent.id] = to.id;
 						const hooks = await fetchWebhooks(to, interaction, 10).catch(console.error);
 						const result = await copyMessages(from, to, hooks, interaction);
 						await deleteWebhooks(hooks);
 						delete activeChannels[to.id];
+						if (to.isThread()) delete activeParentChannels[to.parent.id];
 						followUp(interaction, result ? "I've finished copying!" : "I've aborted copying!");
 					}
 					break;
@@ -396,6 +401,8 @@ client.on(Events.InteractionCreate, async interaction => {
 						await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
 					} else if (activeChannels[to.id] !== undefined) {
 						await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
+					} else if (to.isThread() && activeParentChannels[to.parent.id] !== undefined) {
+						await reply(interaction, `I'm already pasting into <#${activeParentChannels[to.parent.id]}> from <#${activeChannels[activeParentChannels[to.parent.id]]}>!`);
 					} else {
 						let message_url = interaction.options.getString("link");
 						let regex = /https?:\/\/(?:www\.)?discord\.com\/channels\/(?:[0-9]+)\/([0-9]+)\/([0-9]+)/gi;
@@ -411,14 +418,17 @@ client.on(Events.InteractionCreate, async interaction => {
 								let message = await from.messages.fetch(message_id);
 								const hooks = await fetchWebhooks(to, interaction, 1);
 								activeChannels[to.id] = from.id;
+								if (to.isThread()) activeParentChannels[to.parent.id] = to.id;
 								await copyMessage(message, from, to, hooks);
 								await deleteWebhooks(hooks);
 								delete activeChannels[to.id];
+								if (to.isThread()) delete activeChannels[to.parent.id];
 								followUp(interaction, "I've finished copying that message!");
 							} catch (err) {
 								console.error(err);
 								await deleteWebhooks(hooks);
 								delete activeChannels[to.id];
+								if (to.isThread()) delete activeParentChannels[to.parent.id];
 								followUp(interaction, "I've failed to copy that message...");
 							}
 						}
@@ -428,7 +438,12 @@ client.on(Events.InteractionCreate, async interaction => {
 			break;
 		case "stop":
 			let channel = interaction.options.getChannel("channel") || interaction.channel;
-			delete activeChannels[channel.id];
+			if (activeParentChannels[channel.id] !== undefined) {
+				delete activeChannels[activeParentChannels[channel.id]];
+				delete activeParentChannels[channel.id];
+			} else {
+				delete activeChannels[channel.id];
+			}
 			await reply(interaction, `Okay, I'll stop pasting into <#${channel.id}>!`);
 			break;
 		default:
