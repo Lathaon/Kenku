@@ -179,7 +179,7 @@ async function copyMessage(message, from, to, webhooks) {
 		return true;
 	} else if (message.type === MessageType.ThreadStarterMessage) {
 		const starterMessage = await message.channel.fetchStarterMessage();
-		await copyMessage(starterMessage, from, to, webhook, lastAuthor);
+		await copyMessage(starterMessage, from, to, webhook);
 	} else if (normalMessages.indexOf(message.type) === -1) {
 		console.log(`Unknown message type encountered: ${message.type}`);
 		await to.send(
@@ -248,11 +248,68 @@ async function copyMessages(from, to, webhooks, interaction) {
 			await reply(interaction, "Failed to fetch messages!");
 		});
 	}
-	let lastAuthor = null;
 	if (messages && messages.size) {
 		for (const message of [...messages.values()].reverse()) {
 			if (!await copyMessage(message, from, to, webhooks)) return false;
 		}
+	}
+	return true;
+}
+
+async function forumify(from, to, interaction) {
+	let messages = new Collection();
+	let messageBatch = await from.messages.fetch({limit: 100}).catch(async function() {
+		await reply(interaction, "Failed to fetch messages!");
+	});
+	while (messageBatch && messageBatch.size > 0) {
+		if (activeChannels[to.id] !== from.id) return false;
+		to.sendTyping();
+		messages = messages.concat(messageBatch);
+		messageBatch = await from.messages.fetch({
+			limit: 100,
+			before: messageBatch.last().id,
+		}).catch(async function() {
+			await reply(interaction, "Failed to fetch messages!");
+		});
+	}
+	let lastAuthor = null;
+	let messagesInPost = [];
+	if (messages && messages.size) {
+		for (const message of [...messages.values()].reverse()) {
+			if (message.author !== lastAuthor) {
+				if (!await createForumPost(forum, messagesInPost)) return false;
+				lastAuthor = message.author;
+				messagesInPost.clear();
+			}
+			messagesInPost.append(message);
+		}
+		if (messagesInPost.length) {
+			if (!await createForumPost(forum, messagesInPost)) return false;
+		}
+	}
+	return true;
+
+}
+
+async function createForumPost(forum, messagesInPost) {
+	if (messagesInPost.length) return true
+
+	// Need to find character name and picture
+	// Also make sure the first message isn't posted twice
+
+	const thread = await channel.threads.create({
+		name: "Thread Name",
+		autoArchiveDuration: 1440,
+		message: {
+			content: "fuck",
+			attachments: [picture]
+		}
+	}).catch(async function() {
+		await reply(interaction, "Failed to create forum post!");
+		return false;
+	});
+	for (const message of messagesInPost) {
+		await send(null, thread, message.content, message.reactions);
 	}
 	return true;
 }
@@ -436,6 +493,34 @@ client.on(Events.InteractionCreate, async interaction => {
 					break;
 			}
 			break;
+		case "forumify":
+			let from = interaction.options.getChannel("channel") || interaction.channel;
+			let to = interaction.options.getChannel("forum") || interaction.channel;
+			if (from.id === to.id) {
+				await reply(interaction, "I can't paste in the same channel I'm copying from!");
+			} else if (validChannelTypes.indexOf(from.type) === -1) {
+				await reply(interaction, "I can only copy from text-based server channels!");
+			} else if (to.type !== ChannelType.Forum) {
+				await reply(interaction, "I can only create forum posts in forum channels!");
+			} else if (!to.permissionsFor(client.user).has(PermissionsBitField.Flags.SendMessagesInThreads | PermissionsBitField.Flags.CreatePublicThreads)) {
+				await reply(interaction, `I haven't got permission to post in <#${to.id}>!`);
+			} else if (activeChannels[to.id] !== undefined) {
+				await reply(interaction, `I'm already pasting into <#${to.id}> from <#${activeChannels[to.id]}>!`);
+			} else {
+				await reply(interaction, `Okay, I'll convert <#${from.id}> to forum posts in <#${to.id}>...`);
+				activeChannels[to.id] = from.id;
+				if (to.isThread()) activeParentChannels[to.parent.id] = to.id;
+				
+				const result = await copyMessages(from, to, hooks, interaction);
+				delete activeChannels[to.id];
+				if (to.isThread()) delete activeParentChannels[to.parent.id];
+
+
+
+
+
+				followUp(interaction, result ? "I've finished copying!" : "I've aborted copying!");
+			}
 		case "stop":
 			let channel = interaction.options.getChannel("channel") || interaction.channel;
 			if (activeParentChannels[channel.id] !== undefined) {
